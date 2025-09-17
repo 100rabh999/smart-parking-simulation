@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Smart Parking Area Simulation</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  .tooltip {
+    position: absolute;
+    background: rgba(0,0,0,0.7);
+    color: white;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+  #toastContainer {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 50;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    align-items: center;
+  }
+  .nearest {
+    box-shadow: 0 0 10px 4px #00FFFF;
+    animation: blink 1s infinite;
+  }
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+</style>
+</head>
+<body class="bg-gray-100 flex flex-col items-center min-h-screen p-4">
+
+<h1 class="text-3xl font-bold text-blue-700 mb-4">Smart Parking Simulation</h1>
+<p class="mb-4 text-gray-600 text-center">Select an area or find the nearest free parking slot</p>
+
+<!-- Area Panel -->
+<div id="areaPanel" class="grid grid-cols-2 gap-4 w-full max-w-xl mb-4">
+  <button class="bg-blue-500 text-white p-4 rounded shadow" onclick="selectArea('Thakur Village')">Thakur Village</button>
+  <button class="bg-blue-500 text-white p-4 rounded shadow" onclick="selectArea('Borivali Station')">Borivali Station</button>
+  <button class="bg-blue-500 text-white p-4 rounded shadow" onclick="selectArea('Magathane')">Magathane</button>
+  <button class="bg-blue-500 text-white p-4 rounded shadow" onclick="selectArea('Devipada')">Devipada</button>
+</div>
+
+<!-- Nearest Parking Button -->
+<button class="bg-green-600 text-white p-3 rounded shadow mb-4" onclick="findNearestParking()">Find Nearest Parking</button>
+
+<!-- Selected Area Name -->
+<h2 id="selectedArea" class="text-2xl font-bold text-gray-700 mb-4"></h2>
+
+<!-- Statistics Panel -->
+<div id="statsPanel" class="hidden flex justify-around w-full max-w-xl mb-6">
+  <div class="bg-white p-4 rounded shadow w-1/4 text-center">
+    <h2 class="text-xl font-bold text-green-600" id="freeCount">0</h2>
+    <p class="text-gray-600 text-sm">Free</p>
+  </div>
+  <div class="bg-white p-4 rounded shadow w-1/4 text-center">
+    <h2 class="text-xl font-bold text-red-600" id="occupiedCount">0</h2>
+    <p class="text-gray-600 text-sm">Occupied</p>
+  </div>
+  <div class="bg-white p-4 rounded shadow w-1/4 text-center">
+    <h2 class="text-xl font-bold text-yellow-500" id="reservedCount">0</h2>
+    <p class="text-gray-600 text-sm">Reserved</p>
+  </div>
+</div>
+
+<!-- Parking Lot Grid -->
+<div id="parkingLot" class="hidden grid grid-cols-5 gap-4 w-full max-w-xl mb-4"></div>
+
+<!-- Legend -->
+<div id="legend" class="hidden mt-6 flex space-x-6">
+  <div class="flex items-center space-x-2"><div class="w-5 h-5 bg-green-500"></div><span>Free</span></div>
+  <div class="flex items-center space-x-2"><div class="w-5 h-5 bg-red-500"></div><span>Occupied</span></div>
+  <div class="flex items-center space-x-2"><div class="w-5 h-5 bg-yellow-400"></div><span>Reserved</span></div>
+  <div class="flex items-center space-x-2"><div class="w-5 h-5 bg-cyan-400"></div><span>Nearest Free</span></div>
+</div>
+
+<!-- Tooltip & Toast -->
+<div id="tooltip" class="tooltip"></div>
+<div id="toastContainer"></div>
+
+<script>
+  const totalSlots = 20;
+  const areas = {};
+  const tooltip = document.getElementById('tooltip');
+  const toastContainer = document.getElementById('toastContainer');
+
+  ['Thakur Village','Borivali Station','Magathane','Devipada'].forEach(area => {
+    areas[area] = Array.from({length: totalSlots}, (_, i) => ({id: i+1, status: 'free'}));
+  });
+
+  let currentArea = null;
+  let interval;
+
+  function selectArea(areaName){
+    currentArea = areaName;
+    document.getElementById('selectedArea').textContent = `Parking Lot: ${areaName}`;
+    document.getElementById('statsPanel').classList.remove('hidden');
+    document.getElementById('parkingLot').classList.remove('hidden');
+    document.getElementById('legend').classList.remove('hidden');
+
+    renderParking();
+    updateStats();
+
+    if(interval) clearInterval(interval);
+    interval = setInterval(simulateParking, 10000);
+  }
+
+  function renderParking(){
+    const parkingLotDiv = document.getElementById('parkingLot');
+    parkingLotDiv.innerHTML = '';
+    areas[currentArea].forEach(slot => {
+      const div = document.createElement('div');
+      div.className = "relative w-20 h-20 flex items-center justify-center rounded shadow cursor-pointer text-white font-bold";
+      div.textContent = slot.id;
+      setSlotColor(div, slot.status);
+      parkingLotDiv.appendChild(div);
+
+      // Tooltip
+      div.addEventListener('mouseenter', e => {
+        tooltip.style.opacity = 1;
+        tooltip.textContent = `Slot ${slot.id} - ${slot.status.toUpperCase()}`;
+      });
+      div.addEventListener('mousemove', e => {
+        tooltip.style.left = e.pageX + 10 + 'px';
+        tooltip.style.top = e.pageY + 10 + 'px';
+      });
+      div.addEventListener('mouseleave', () => tooltip.style.opacity = 0);
+
+      // Click to reserve/unreserve
+      div.addEventListener('click', () => {
+        if(slot.status==='free'){
+          slot.status='reserved';
+          setSlotColor(div, slot.status);
+          showToast(`You reserved Slot ${slot.id} in ${currentArea}`);
+        } else if(slot.status==='reserved'){
+          slot.status='free';
+          setSlotColor(div, slot.status);
+          showToast(`Reservation canceled for Slot ${slot.id} in ${currentArea}`);
+        }
+        highlightNearestFree();
+        updateStats();
+      });
+
+      slot.element = div;
+    });
+
+    highlightNearestFree();
+  }
+
+  function setSlotColor(div, status){
+    div.classList.remove('bg-green-500','bg-red-500','bg-yellow-400','nearest');
+    if(status==='free') div.classList.add('bg-green-500');
+    else if(status==='occupied') div.classList.add('bg-red-500');
+    else if(status==='reserved') div.classList.add('bg-yellow-400');
+  }
+
+  function updateStats(){
+    const areaSlots = areas[currentArea];
+    document.getElementById('freeCount').textContent = areaSlots.filter(s=>s.status==='free').length;
+    document.getElementById('occupiedCount').textContent = areaSlots.filter(s=>s.status==='occupied').length;
+    document.getElementById('reservedCount').textContent = areaSlots.filter(s=>s.status==='reserved').length;
+  }
+
+  function showToast(message){
+    const toast = document.createElement('div');
+    toast.className = "bg-blue-600 text-white px-4 py-2 rounded shadow";
+    toast.textContent = message;
+    toastContainer.appendChild(toast);
+    setTimeout(()=>toast.remove(), 3000);
+  }
+
+  function simulateParking(){
+    const areaSlots = areas[currentArea];
+    const freeSlots = areaSlots.filter(s=>s.status==='free');
+    const occupiedSlots = areaSlots.filter(s=>s.status==='occupied');
+
+    if(freeSlots.length>0){
+      const slot = freeSlots[Math.floor(Math.random()*freeSlots.length)];
+      slot.status='occupied';
+      setSlotColor(slot.element, slot.status);
+      showToast(`Slot ${slot.id} is now occupied in ${currentArea}`);
+    }
+
+    if(occupiedSlots.length>0){
+      const slot = occupiedSlots[Math.floor(Math.random()*occupiedSlots.length)];
+      slot.status='free';
+      setSlotColor(slot.element, slot.status);
+      showToast(`Slot ${slot.id} is now free in ${currentArea}`);
+    }
+
+    highlightNearestFree();
+    updateStats();
+  }
+
+  function highlightNearestFree(){
+    const areaSlots = areas[currentArea];
+    areaSlots.forEach(s => s.element.classList.remove('nearest'));
+    const freeSlots = areaSlots.filter(s=>s.status==='free');
+    if(freeSlots.length>0){
+      freeSlots[0].element.classList.add('nearest');
+    }
+  }
+
+  // Nearest parking logic
+  function findNearestParking(){
+    let bestArea = null;
+    let maxFree = -1;
+    Object.keys(areas).forEach(area => {
+      const freeCount = areas[area].filter(s=>s.status==='free').length;
+      if(freeCount > maxFree){
+        maxFree = freeCount;
+        bestArea = area;
+      }
+    });
+
+    if(bestArea && maxFree>0){
+      selectArea(bestArea);
+      const nearestSlot = areas[bestArea].find(s=>s.status==='free');
+      showToast(`Nearest parking found at ${bestArea}, Slot ${nearestSlot.id}`);
+    } else {
+      showToast('No free parking available nearby!');
+    }
+  }
+</script>
+</body>
+</html>
